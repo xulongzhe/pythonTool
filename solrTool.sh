@@ -62,7 +62,7 @@ function replicaCheck() {
 }
 
 function replicaSync() {
-	for i in `replicaCheck | grep 1G`;do
+	for i in `replicaCheck | grep out-sync`;do
 		diff=`echo $i | 'awk {print $7}'`
 		ip1=`echo $i | 'awk {print $1}'`
 		r1=`echo $i | 'awk {print $3}'`
@@ -117,17 +117,13 @@ function forceRepair() {
 	echoAndLog 'Force repair finish'
 }
 
-
 function repairIfNeed() {
-	last=`cat /var/log/dblog/lastRepair`
-	if (("`now`"-"$last">"1800"));then
-		healthCheck
-		if [ "$?" != "0" ];then
-			repair
-			now > /var/log/dblog/lastRepair
-		else
-			echo "No need to repair"
-		fi
+	healthCheck
+	if [ "$?" != "0" ];then
+		repair
+		now > /var/log/dblog/lastRepair
+	else
+		echoAndLog "No need to repair"
 	fi
 }
 
@@ -162,6 +158,3 @@ elif [ "$cmd" == "-replicaSync" ];then
 else
 	printUsage
 fi
-
-
-
