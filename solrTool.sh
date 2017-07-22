@@ -65,7 +65,7 @@ function clearSolrMeta() {
 # replica1_IP  replica1_size  replica1_name                           replica2_IP replica2_size  replica2_name                      replica_size_diff  
 # 21.60.1.91   812000         /index/FaceImage01_shard10_replica1      21.60.1.89  0	        /index/FaceImage01_shard10_replica2 812000                 out-sync
 function replicaCheck() {
-	remoteWithIp 'du /index --max-depth=1 | grep .*replica.*' | sort -k 3 -d | sed 'N;s/\n/\t/' | awk '{diff=sqrt(($2-$5)*($2-$5));str=$0"\t"$2-$5;if(diff>524288000)str=str"  out-sync";print str}'
+	remoteWithIp 'du /index --max-depth=1 | grep .*replica.*' | sort -k 3 -d | sed 'N;s/\n/\t/' | awk '{diff=sqrt(($2-$5)*($2-$5));str=$0"\t"$2-$5;if(diff>512000)str=str"  out-sync";print str}'
 }
 
 # 重新同步体积相差过大的Replica，可能会要求输入密码，如果没有配无密钥的话
