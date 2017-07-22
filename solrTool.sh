@@ -93,7 +93,7 @@ function healthCheck() {
 		healthy=`/bigdata/salut/components/solr/bin/solr healthcheck -c $core -z localhost | grep status | head -1 | grep healthy`
 		if [ ! "$healthy" ];then
 			echoAndLog "$core: unhealthy"
-			echoAndLog "SFinish Checking,solr is unhealthy"
+			echoAndLog "Finish Checking,solr is unhealthy"
 			return 1
 		else
 			echoAndLog "$core: healthy"
