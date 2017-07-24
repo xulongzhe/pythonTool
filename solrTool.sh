@@ -140,8 +140,8 @@ function forceRepair() {
         remote 'dbserver.sh start_server zookeeper'
 	uploadConf
 	dbserver.sh start
-        echo "PLEASE WAIT 30s"
-        sleep 30
+        echo "PLEASE WAIT 60s"
+        sleep 60
 	sh /bigdata/salut/conf/salut/kafka/kafkaCreate.sh
 	echoAndLog 'Force repair finish'
 	date +%s > $lastRepair
@@ -179,7 +179,6 @@ function printUsage() {
 	echo "Options:"
 	echo "	-healthCheck      solr health check"
 	echo "	-replicaCheck     compare size between replicas"
-	echo "	-repairIfNeed     do repair if solr is corrupt"
 	echo "	-repair           repair solr by clearing solr mata from zookeeper"
 	echo "	-forceRepair      repair solr by deleting zookeeper data (VERSION-2) directly"
 	echo "	-repairIfNeed     do repair if solr is corrupt"
