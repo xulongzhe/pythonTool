@@ -156,6 +156,11 @@ function repairIfNeed() {
 
 # 保证一次修复完成后，下一次修复延迟一段时间
 function secureRepair() {
+	solr=`jps -lm | grep 8983`
+	if [ ! "$solr" ];then
+		echo "solr is not running, skip"
+		return 0
+	fi
 	ts=`date +%s`
 	if [ -f "$lastRepair" ];then
 		last=`cat $lastRepair`
