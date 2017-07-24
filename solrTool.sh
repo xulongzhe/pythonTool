@@ -104,18 +104,15 @@ function replicaSync() {
 # 检查每个Collections状态是否正常，正常返回0，异常返回1
 function healthCheck() {
 	echoAndLog "Solr healthcheck..."
-	for core in `getCores`;do
-		healthy=`/bigdata/salut/components/solr/bin/solr healthcheck -c $core -z localhost | grep status | head -1 | grep healthy`
-		if [ ! "$healthy" ];then
-			echoAndLog "$core: unhealthy"
-			echoAndLog "Finish Checking,solr is unhealthy"
-			return 1
-		else
-			echoAndLog "$core: healthy"
-		fi
-	done
-	echoAndLog "Finish Checking, solr is healthy"
-	return 0
+	down=`/bigdata/salut/components/solr/server/scripts/cloud-scripts/zkcli.sh -zkhost localhost -cmd get /clusterstate.json | grep '"state":"down"'`
+	recoveryfailed=`/bigdata/salut/components/solr/server/scripts/cloud-scripts/zkcli.sh -zkhost localhost -cmd get /clusterstate.json | grep '"state":"recovery_failed"'`
+	if [ "$down" ] || [ "$recoveryfailed" ];then
+		echoAndLog "Finish Checking,solr is unhealthy"
+		return 1
+	else
+		echoAndLog "Finish Checking, solr is healthy"
+		return 0
+	fi
 }
 
 # 通过删除zk节点的方式修复solr
