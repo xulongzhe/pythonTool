@@ -2,6 +2,12 @@
 # solr检查/修复脚本
 # 注意：本脚本只适用于集群状态下，2备份的solr
 
+# 记录最近一次修复时间
+lastRepair="/tmp/repairTime"
+
+# 两次repair至少间隔半小时
+minRepairInterval=1800
+
 function log() {
 	echo "`now` - $1" >> /var/log/dblog/solrTool.log
 }
@@ -11,13 +17,8 @@ function echoAndLog() {
 	log "$1"
 }
 
-function logAndExe() {
-	$1
-	echoAndLog "$1"
-}
-
 function now() {
-	date +"%Y-%m-%d %H:%M:%S"
+        date +"%Y-%m-%d-%H:%M:%S"
 }
 
 # 获取所有Core名称
@@ -70,20 +71,34 @@ function replicaCheck() {
 
 # 重新同步体积相差过大的Replica，可能会要求输入密码，如果没有配无密钥的话
 function replicaSync() {
+	remote 'dbserver.sh stop_server daemon'
+    remote 'dbserver.sh stop_server solr'
+    IFSBAK=$IFS
+    IFS=$'\n'
 	for i in `replicaCheck | grep out-sync`;do
-		diff=`echo $i | 'awk {print $7}'`
-		ip1=`echo $i | 'awk {print $1}'`
-		r1=`echo $i | 'awk {print $3}'`
-		ip1=`echo $i | 'awk {print $4}'`
-		r2=`echo $i | 'awk {print $6}'`
-		if (("$diff">"0"));then
-			logAndExe "ssh $ip2 \"mv $r2/data $r2/data_`now`\""
-			logAndExe "scp -r $ip1:$r1/data $ip2:$r2"
+		diff=`echo $i | awk '{print $7}'`
+		ip1=`echo $i | awk '{print $1}'`
+		r1=`echo $i | awk '{print $3}'`
+		ip2=`echo $i | awk '{print $4}'`
+		r2=`echo $i | awk '{print $6}'`
+		if [ "$diff" -gt 0 ];then
+                        ssh $ip2 "mkdir -p /home$r2"
+			ssh $ip2 "mv $r2/data /home$r2/data_`now`"
+			echoAndLog "ssh $ip2 \"mv $r2/data /home$r2/data_`now`\""
+			scp -r $ip1:$r1/data $ip2:$r2
+			echoAndLog "scp -r $ip1:$r1/data $ip2:$r2"
 		else
-			logAndExe "ssh $ip1 \"mv $r1/data $r1/data_`now`\""
-			logAndExe "scp -r $ip2:$r2/data $ip1:$r1"
+                        ssh $ip1 "mkdir -p /home$r1"
+		        ssh $ip1 "mv $r1/data /home$r1/data_`now`"
+                        echoAndLog "ssh $ip1 \"mv $r1/data /home$r1/data_`now`\""
+			scp -r $ip2:$r2/data $ip1:$r1
+                        echoAndLog "scp -r $ip2:$r2/data $ip1:$r1"
 		fi
 	done
+    IFS=$IFSBAK
+    remote 'dbserver.sh start_server solr'
+    remote 'dbserver.sh start_server daemon'
+    echoAndLog 'ReplicaSync finish'
 }
 
 # 检查每个Collections状态是否正常，正常返回0，异常返回1
@@ -93,7 +108,7 @@ function healthCheck() {
 		healthy=`/bigdata/salut/components/solr/bin/solr healthcheck -c $core -z localhost | grep status | head -1 | grep healthy`
 		if [ ! "$healthy" ];then
 			echoAndLog "$core: unhealthy"
-			echoAndLog "Finish Checking,solr is unhealthy"
+			echoAndLog "SFinish Checking,solr is unhealthy"
 			return 1
 		else
 			echoAndLog "$core: healthy"
@@ -114,18 +129,22 @@ function repair() {
 	remote 'dbserver.sh start_server solr'
 	remote 'dbserver.sh start_server daemon'
 	echoAndLog 'Repair finish'
+	date +%s > $lastRepair
 }
 
 # 通过删除zk数据文件的方式修复solr
 function forceRepair() {
 	echoAndLog "start to force repair..."
 	dbserver.sh stop
-	mv /bigdata/salut/components/zookeeper/data/version-2 /tmp/version-2_`now`
-	remote 'dbserver.sh start_server zookeeper'
+        remote "mv /bigdata/salut/components/zookeeper/data/version-2 /tmp/version-2_`now`"	
+        remote 'dbserver.sh start_server zookeeper'
 	uploadConf
 	dbserver.sh start
+        echo "PLEASE WAIT 30s"
+        sleep 30
 	sh /bigdata/salut/conf/salut/kafka/kafkaCreate.sh
 	echoAndLog 'Force repair finish'
+	date +%s > $lastRepair
 }
 
 # 检查collection状态，如果不正常就执行修复
@@ -135,6 +154,22 @@ function repairIfNeed() {
 		repair
 	else
 		echoAndLog "No need to repair"
+	fi
+}
+
+# 保证一次修复完成后，下一次修复延迟一段时间
+function secureRepair() {
+	ts=`date +%s`
+	if [ -f "$lastRepair" ];then
+		last=`cat $lastRepair`
+		delay=$[ts-last]
+		if [ "$delay" -gt "$minRepairInterval" ];then
+			repairIfNeed
+		else
+			echoAndLog "You have to wait at least ${minRepairInterval}s after a repair at `date -d @$last '+%Y-%m-%d-%H:%M:%S'`"
+		fi
+	else
+		repairIfNeed
 	fi
 }
 
@@ -148,7 +183,8 @@ function printUsage() {
 	echo "	-repair           repair solr by clearing solr mata from zookeeper"
 	echo "	-forceRepair      repair solr by deleting zookeeper data (VERSION-2) directly"
 	echo "	-repairIfNeed     do repair if solr is corrupt"
-	echo "	-syncReplica      copy biggest replica to another"
+	echo "	-secureRepair     similar with '-repairIfNeed', but avoid doing repair too close"
+	echo "	-replicaSync      copy biggest replica to another"
 }
 
 if [ "`ps -ef | grep $0 | grep -v $$ | grep -v grep`" ];then
@@ -168,6 +204,8 @@ elif [ "$cmd" == "-forceRepair" ];then
 	forceRepair
 elif [ "$cmd" == "-repairIfNeed" ];then
 	repairIfNeed
+elif [ "$cmd" == "-secureRepair" ];then
+	secureRepair
 elif [ "$cmd" == "-replicaSync" ];then
 	replicaSync	
 else
