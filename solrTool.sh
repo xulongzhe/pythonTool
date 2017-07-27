@@ -19,7 +19,7 @@ function report() {
 }
 
 function now() {
-        date +"%Y-%m-%d-%H:%M:%S"
+        date +"%Y-%m-%d_%H:%M:%S"
 }
 
 # 获取所有Core名称
