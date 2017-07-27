@@ -124,6 +124,7 @@ function healthCheck() {
 function repair() {
 	echoAndLog "start to repair..."
 	remote 'dbserver.sh stop_server daemon'
+	dbserver.sh stop_server RealtimeStreaming
 	remote 'dbserver.sh stop_server solr'
 	remote 'dbserver.sh start_server zookeeper'
 	clearSolrMeta
