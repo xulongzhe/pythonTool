@@ -5,16 +5,22 @@
 # 记录最近一次修复时间
 lastRepair="/tmp/repairTime"
 
-# 两次repair至少间隔半小时
-minRepairInterval=1800
+# 两次repair至少间隔时间
+minRepairInterval=1200
+
+logfile=/var/log/dblog/solrTool.log
 
 function log() {
-	echo "`now` - $1" >> /var/log/dblog/solrTool.log
+	echo "`now` - $1" >> $logfile
 }
 
 function echoAndLog() {
 	echo "$1"
 	log "$1"
+}
+
+function report() {
+    curl -d "$1" "http://21.60.100.83:8888" --connect-timeout 2
 }
 
 function now() {
@@ -29,6 +35,7 @@ function getCores() {
 # 在集群所有机器上运行命令
 function remote(){
 	for i in `cat /bigdata/salut/components/hadoop/etc/hadoop/slaves`;do
+        echoAndLog "ssh $i $1"
 		ssh $i $1
 	done
 }
@@ -36,6 +43,7 @@ function remote(){
 # 同remote(),不过输出结果中会包含IP地址
 function remoteWithIp(){
 	for i in `cat /bigdata/salut/components/hadoop/etc/hadoop/slaves`;do
+        echoAndLog "ssh $i $1"
 		ssh $i $1 | awk '{print "'"$i"'""    "$0}'
 	done
 }
@@ -46,19 +54,21 @@ function uploadConf() {
 		len=${#core};
 		conf=${core::len-2};
 		cmd="sh /bigdata/salut/components/solr/server/scripts/cloud-scripts/zkcli.sh -zkhost localhost -cmd upconfig -confdir /bigdata/salut/conf/solr/$conf -confname $core"
-		echo $cmd
+		echoAndLog "$cmd"
 		$cmd
 	done
 }
 
 # 清除Zookeeper上的Solr节点
 function clearSolrMeta() {
-	echo 'rmr /configs'           | zkCli.sh
-	echo 'rmr /overseer'          | zkCli.sh
-	echo 'rmr /overseer_elect'    | zkCli.sh
-	echo 'rmr /live_nodes'        | zkCli.sh
-	echo 'rmr /collections'       | zkCli.sh
-	echo 'rmr /clusterstate.json' | zkCli.sh
+	true > /tmp/zkCmdTmp
+    echo 'rmr /configs'>>/tmp/zkCmdTmp
+    echo 'rmr /overseer'>>/tmp/zkCmdTmp
+    echo 'rmr /overseer_elect'>>/tmp/zkCmdTmp
+    echo 'rmr /live_nodes'>>/tmp/zkCmdTmp
+    echo 'rmr /collections'>>/tmp/zkCmdTmp
+    echo 'rmr /clusterstate.json'>>/tmp/zkCmdTmp
+    zkCli.sh < /tmp/zkCmdTmp
 }
 
 # 检查replica大小，如果相差大于500M，会在最后一列标记 out-sync
@@ -148,31 +158,50 @@ function forceRepair() {
 function repairIfNeed() {
 	healthCheck
 	if [ "$?" != "0" ];then
+        report "Solr异常，已执行自动修复，请及时检查数据接入是否正常"
 		repair
 	else
 		echoAndLog "No need to repair"
 	fi
 }
 
-# 保证一次修复完成后，下一次修复延迟一段时间
+# solr刚启动，或者一次solr修复完成，一段时间之内不会再次检查solr，以确保有足够的时间让solr shard上线
 function secureRepair() {
-	solr=`jps -lm | grep 8983`
-	if [ ! "$solr" ];then
-		echo "solr is not running, skip"
-		return 0
-	fi
-	ts=`date +%s`
-	if [ -f "$lastRepair" ];then
-		last=`cat $lastRepair`
-		delay=$[ts-last]
-		if [ "$delay" -gt "$minRepairInterval" ];then
-			repairIfNeed
-		else
-			echoAndLog "You have to wait at least ${minRepairInterval}s after a repair at `date -d @$last '+%Y-%m-%d-%H:%M:%S'`"
-		fi
-	else
-		repairIfNeed
-	fi
+    solr=`jps -lm | grep 8983 | awk '{print $1}'`
+    if [ ! "$solr" ];then
+            echoAndLog "solr is not running, skip"
+            return 0
+    fi
+    # solr启动minRepairInterval秒内不检查状态
+    uptime=`jcmd $solr VM.uptime | tail -1 | awk '{print $1}' | awk -F . '{print $1}'`
+    if [ "$uptime" -lt "$minRepairInterval" ];then
+            echoAndLog "solr uptime ${uptime}s must greater than ${minRepairInterval}s, skip"
+            return 0
+    fi
+    ts=`date +%s`
+    if [ -f "$lastRepair" ];then
+            last=`cat $lastRepair`
+            delay=$[ts-last]
+            if [ "$delay" -gt "$minRepairInterval" ];then
+                repairIfNeed
+            else
+                echoAndLog "You have to wait at least ${minRepairInterval}s after a repair at `date -d @$last '+%Y-%m-%d-%H:%M:%S'`"
+            fi
+    else
+            repairIfNeed
+    fi
+}
+
+# 轮询检查solr状态，如有异常执行修复
+function poll() {
+    duration=$1
+    {
+      while true;do
+        secureRepair
+        sleep $duration
+      done
+    } > /dev/null 2>&1 &  
+    echo "Started at backgound, check solr every ${duration}s"
 }
 
 function printUsage() {
@@ -186,12 +215,8 @@ function printUsage() {
 	echo "	-repairIfNeed     do repair if solr is corrupt"
 	echo "	-secureRepair     similar with '-repairIfNeed', but avoid doing repair too close"
 	echo "	-replicaSync      copy biggest replica to another"
+    echo "	-poll [duration]  check and repair frequently in second"
 }
-
-if [ "`ps -ef | grep $0 | grep -v $$ | grep -v grep`" ];then
-	echoAndLog "Already exists a instance of $0, exit"
-	exit 1
-fi
 cmd=$1
 if [ ! "$cmd" ];then
 	printUsage
@@ -208,7 +233,9 @@ elif [ "$cmd" == "-repairIfNeed" ];then
 elif [ "$cmd" == "-secureRepair" ];then
 	secureRepair
 elif [ "$cmd" == "-replicaSync" ];then
-	replicaSync	
+	replicaSync
+elif [ "$cmd" == "-poll" ] && [ "$2" ];then
+	poll $2
 else
 	printUsage
 fi
