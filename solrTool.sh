@@ -178,6 +178,13 @@ function secureRepair() {
 # 轮询检查solr状态，如有异常执行修复
 function poll() {
     duration=$1
+    # 杀掉其他正在运行的实例
+    myname=`basename $0`
+    otherInstance=`ps -ef | grep $myname | grep -v grep | grep -v $$ | awk '{print $2}' | xargs`
+    if [ "$otherInstance" ];then
+        kill -9 $otherInstance
+        echo "Find other running instance, kill it"
+    fi
     {
       while true;do
         secureRepair
