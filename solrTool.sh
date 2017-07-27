@@ -2,12 +2,7 @@
 # solr检查/修复脚本
 # 注意：本脚本只适用于集群状态下，2备份的solr
 
-# 记录最近一次修复时间
-lastRepair="/tmp/repairTime"
-
-# 两次repair至少间隔时间
-minRepairInterval=1200
-
+minRepairInterval=1200 # 两次repair至少间隔时间
 logfile=/var/log/dblog/solrTool.log
 
 function log() {
@@ -136,7 +131,6 @@ function repair() {
 	remote 'dbserver.sh start_server solr'
 	remote 'dbserver.sh start_server daemon'
 	echoAndLog 'Repair finish'
-	date +%s > $lastRepair
 }
 
 # 通过删除zk数据文件的方式修复solr
@@ -151,7 +145,6 @@ function forceRepair() {
         sleep 60
 	sh /bigdata/salut/conf/salut/kafka/kafkaCreate.sh
 	echoAndLog 'Force repair finish'
-	date +%s > $lastRepair
 }
 
 # 检查collection状态，如果不正常就执行修复
@@ -165,8 +158,9 @@ function repairIfNeed() {
 	fi
 }
 
-# solr刚启动，或者一次solr修复完成，一段时间之内不会再次检查solr，以确保有足够的时间让solr shard上线
+# solr启动后一段时间之内不会再次检查solr，以确保有足够的时间让solr shard上线
 function secureRepair() {
+    # 当主机solr进程未启动则认为是人为关掉的，跳过检查
     solr=`jps -lm | grep 8983 | awk '{print $1}'`
     if [ ! "$solr" ];then
             echoAndLog "solr is not running, skip"
@@ -178,18 +172,7 @@ function secureRepair() {
             echoAndLog "solr uptime ${uptime}s must greater than ${minRepairInterval}s, skip"
             return 0
     fi
-    ts=`date +%s`
-    if [ -f "$lastRepair" ];then
-            last=`cat $lastRepair`
-            delay=$[ts-last]
-            if [ "$delay" -gt "$minRepairInterval" ];then
-                repairIfNeed
-            else
-                echoAndLog "You have to wait at least ${minRepairInterval}s after a repair at `date -d @$last '+%Y-%m-%d-%H:%M:%S'`"
-            fi
-    else
-            repairIfNeed
-    fi
+    repairIfNeed
 }
 
 # 轮询检查solr状态，如有异常执行修复
@@ -201,7 +184,7 @@ function poll() {
         sleep $duration
       done
     } > /dev/null 2>&1 &  
-    echo "Started at backgound, check solr every ${duration}s"
+    echo "Started in backgound, check solr every ${duration}s, log to $logfile"
 }
 
 function printUsage() {
@@ -217,6 +200,7 @@ function printUsage() {
 	echo "	-replicaSync      copy biggest replica to another"
     echo "	-poll [duration]  check and repair frequently in second"
 }
+
 cmd=$1
 if [ ! "$cmd" ];then
 	printUsage
