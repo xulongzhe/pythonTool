@@ -56,7 +56,7 @@ function uploadConf() {
 
 # 清除Zookeeper上的Solr节点
 function clearSolrMeta() {
-	true > /tmp/zkCmdTmp
+    true > /tmp/zkCmdTmp
     echo 'rmr /configs'>>/tmp/zkCmdTmp
     echo 'rmr /overseer'>>/tmp/zkCmdTmp
     echo 'rmr /overseer_elect'>>/tmp/zkCmdTmp
