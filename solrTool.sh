@@ -30,7 +30,7 @@ function getCores() {
 # 在集群所有机器上运行命令
 function remote(){
 	for i in `cat /bigdata/salut/components/hadoop/etc/hadoop/slaves`;do
-        echoAndLog "ssh $i $1"
+        log "ssh $i $1"
 		ssh $i $1
 	done
 }
@@ -38,7 +38,7 @@ function remote(){
 # 同remote(),不过输出结果中会包含IP地址
 function remoteWithIp(){
 	for i in `cat /bigdata/salut/components/hadoop/etc/hadoop/slaves`;do
-        echoAndLog "ssh $i $1"
+        log "ssh $i $1"
 		ssh $i $1 | awk '{print "'"$i"'""    "$0}'
 	done
 }
